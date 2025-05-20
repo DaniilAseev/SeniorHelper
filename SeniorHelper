@@ -1,0 +1,336 @@
+import tkinter as tk
+from tkinter import messagebox, simpledialog
+import smtplib
+from datetime import datetime, timedelta
+import threading
+import time
+import webbrowser
+import pyperclip
+from tkinter import ttk  # Для Combobox
+
+class SeniorHelperApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("SeniorHelper")
+        self.root.geometry("500x800")
+        
+        # Настройки для SMS (используем Twilio API)
+        self.twilio_account_sid = 'your_account_sid'
+        self.twilio_auth_token = 'your_auth_token'
+        self.twilio_phone_number = 'your_twilio_phone'
+        self.emergency_contacts = {
+            "Скорая помощь": "112",
+            "Полиция": "112",
+            "Пожарная (МЧС)": "112",
+            "Служба газа": "112"
+        }
+        
+        # Настройки видеозвонка (Jitsi Meet API)
+        self.jitsi_server = "https://meet.jit.si/SeniorHelper-"
+        self.current_video_call_url = ""
+        
+        # Список активных напоминаний
+        self.reminders = []
+        self.reminder_thread = None
+        
+        self.create_widgets()
+        self.start_reminder_checker()
+    
+    def create_widgets(self):
+        # Кнопка SOS с выбором типа помощи
+        self.sos_frame = tk.LabelFrame(self.root, text="Экстренный вызов")
+        self.sos_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        self.help_type = tk.StringVar()
+        self.help_type.set("Скорая помощь")  # Значение по умолчанию
+        
+        self.help_combobox = ttk.Combobox(
+            self.sos_frame,
+            textvariable=self.help_type,
+            values=list(self.emergency_contacts.keys()),
+            state="readonly",
+            font=("Arial", 12)
+        )
+        self.help_combobox.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.sos_button = tk.Button(
+            self.sos_frame, 
+            text="SOS", 
+            bg="red", 
+            fg="white", 
+            font=("Arial", 24, "bold"),
+            height=2,
+            command=self.send_sos
+        )
+        self.sos_button.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.sos_status = tk.Label(
+            self.sos_frame,
+            text="Готов",
+            fg="green",
+            font=("Arial", 12)
+        )
+        self.sos_status.pack()
+        
+        # Видеозвонок
+        self.video_call_frame = tk.Frame(self.root)
+        self.video_call_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        self.video_call_button = tk.Button(
+            self.video_call_frame,
+            text="Видеозвонок",
+            bg="blue",
+            fg="white",
+            font=("Arial", 18),
+            height=2,
+            command=self.start_video_call
+        )
+        self.video_call_button.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        self.copy_link_button = tk.Button(
+            self.video_call_frame,
+            text="Копировать ссылку",
+            bg="light blue",
+            fg="black",
+            font=("Arial", 12),
+            height=2,
+            command=self.copy_video_link,
+            state=tk.DISABLED
+        )
+        self.copy_link_button.pack(side=tk.LEFT, fill=tk.X, padx=(5, 0), expand=True)
+        
+        # Напоминания о лекарствах
+        self.reminder_frame = tk.LabelFrame(self.root, text="Напоминания о лекарствах")
+        self.reminder_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        self.add_reminder_button = tk.Button(
+            self.reminder_frame,
+            text="Добавить напоминание",
+            bg="green",
+            fg="white",
+            font=("Arial", 18),
+            height=2,
+            command=self.add_reminder_dialog
+        )
+        self.add_reminder_button.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.reminders_listbox = tk.Listbox(self.reminder_frame, height=5)
+        self.reminders_listbox.pack(fill=tk.BOTH, padx=5, pady=5, expand=True)
+        
+        # Лог событий
+        self.log_frame = tk.LabelFrame(self.root, text="Журнал событий")
+        self.log_frame.pack(fill=tk.BOTH, padx=20, pady=10, expand=True)
+        
+        self.log_text = tk.Text(self.log_frame)
+        self.log_text.pack(fill=tk.BOTH, padx=5, pady=5, expand=True)
+    
+    def send_sos(self):
+        help_type = self.help_type.get()
+        contact_number = self.emergency_contacts.get(help_type, "112")
+        
+        self.sos_status.config(text=f"Вызов {help_type}...", fg="orange")
+        self.log(f"Активирована кнопка SOS - вызов {help_type}")
+        
+        # Имитация отправки (в реальном приложении используйте Twilio API)
+        threading.Thread(target=self._simulate_sos_send, args=(help_type, contact_number)).start()
+    
+    def _simulate_sos_send(self, help_type, contact_number):
+        try:
+            # Имитация задержки отправки
+            time.sleep(2)
+            
+            # В реальном приложении:
+            # from twilio.rest import Client
+            # client = Client(self.twilio_account_sid, self.twilio_auth_token)
+            # message = client.messages.create(
+            #     body=f"SOS! Требуется {help_type}!",
+            #     from_=self.twilio_phone_number,
+            #     to=contact_number
+            # )
+            
+            self.log(f"SOS уведомление отправлено: {help_type}")
+            self.sos_status.config(text=f"{help_type} в пути!", fg="green")
+            messagebox.showinfo("SOS", f"{help_type} уже в пути! Оставайтесь на связи.")
+        except Exception as e:
+            self.log(f"Ошибка при отправке SOS: {str(e)}")
+            self.sos_status.config(text="Ошибка отправки", fg="red")
+            messagebox.showerror("Ошибка", f"Не удалось вызвать {help_type}")
+    
+    def start_video_call(self):
+        self.log("Инициализация видеозвонка...")
+        
+        room_id = datetime.now().strftime("%Y%m%d%H%M%S")
+        self.current_video_call_url = f"{self.jitsi_server}{room_id}"
+        
+        self.log(f"Ссылка на видеозвонок: {self.current_video_call_url}")
+        self.copy_link_button.config(state=tk.NORMAL)
+        
+        webbrowser.open_new(self.current_video_call_url)
+        
+        messagebox.showinfo(
+            "Видеозвонок", 
+            f"Видеозвонок начат. Вы можете скопировать ссылку для приглашения."
+        )
+    
+    def copy_video_link(self):
+        if self.current_video_call_url:
+            pyperclip.copy(self.current_video_call_url)
+            self.log("Ссылка на видеозвонок скопирована в буфер обмена")
+            messagebox.showinfo("Копирование", "Ссылка скопирована в буфер обмена!")
+        else:
+            messagebox.showerror("Ошибка", "Нет активной ссылки на видеозвонок")
+    
+    def add_reminder_dialog(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Добавить напоминание")
+        dialog.resizable(False, False)
+        
+        # Название лекарства
+        tk.Label(dialog, text="Название лекарства:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        med_entry = tk.Entry(dialog, width=30)
+        med_entry.grid(row=0, column=1, padx=5, pady=2)
+        med_entry.focus_set()
+        
+        # Время
+        tk.Label(dialog, text="Время (ЧЧ:ММ):").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        
+        time_frame = tk.Frame(dialog)
+        time_frame.grid(row=1, column=1, padx=5, pady=2, sticky="w")
+        
+        self.hour_var = tk.StringVar()
+        self.minute_var = tk.StringVar()
+        
+        hour_spin = tk.Spinbox(
+            time_frame, 
+            from_=0, 
+            to=23, 
+            width=2, 
+            format="%02.0f", 
+            textvariable=self.hour_var,
+            command=lambda: self.auto_focus_minute(minute_spin)
+        )
+        hour_spin.pack(side=tk.LEFT)
+        
+        tk.Label(time_frame, text=":").pack(side=tk.LEFT)
+        
+        minute_spin = tk.Spinbox(
+            time_frame, 
+            from_=0, 
+            to=59, 
+            width=2, 
+            format="%02.0f", 
+            textvariable=self.minute_var
+        )
+        minute_spin.pack(side=tk.LEFT)
+        
+        # Повторение
+        repeat_var = tk.BooleanVar()
+        tk.Checkbutton(
+            dialog, 
+            text="Повторять ежедневно", 
+            variable=repeat_var
+        ).grid(row=2, columnspan=2, pady=5)
+        
+        # Кнопки
+        button_frame = tk.Frame(dialog)
+        button_frame.grid(row=3, columnspan=2, pady=5)
+        
+        tk.Button(
+            button_frame, 
+            text="Отмена", 
+            command=dialog.destroy
+        ).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(
+            button_frame, 
+            text="Сохранить", 
+            command=lambda: self.save_reminder(
+                med_entry.get(),
+                f"{self.hour_var.get()}:{self.minute_var.get()}",
+                repeat_var.get(),
+                dialog
+            )
+        ).pack(side=tk.LEFT, padx=5)
+    
+    def auto_focus_minute(self, minute_entry):
+        minute_entry.focus_set()
+    
+    def save_reminder(self, medicine, time_str, repeat, dialog):
+        if not medicine:
+            messagebox.showerror("Ошибка", "Введите название лекарства")
+            return
+        
+        try:
+            reminder_time = datetime.strptime(time_str, "%H:%M").time()
+            now = datetime.now()
+            reminder_datetime = datetime.combine(now.date(), reminder_time)
+            
+            if reminder_datetime < now:
+                reminder_datetime += timedelta(days=1)
+            
+            reminder = {
+                "medicine": medicine,
+                "time": reminder_time,
+                "datetime": reminder_datetime,
+                "repeat": repeat
+            }
+            
+            self.reminders.append(reminder)
+            self.update_reminders_list()
+            self.log(f"Добавлено напоминание: {medicine} в {time_str}")
+            dialog.destroy()
+            
+        except ValueError:
+            messagebox.showerror("Ошибка", "Неверный формат времени")
+    
+    def update_reminders_list(self):
+        self.reminders_listbox.delete(0, tk.END)
+        for reminder in sorted(self.reminders, key=lambda x: x["datetime"]):
+            repeat = " (ежедневно)" if reminder["repeat"] else ""
+            self.reminders_listbox.insert(
+                tk.END,
+                f"{reminder['medicine']} в {reminder['time'].strftime('%H:%M')}{repeat}"
+            )
+    
+    def start_reminder_checker(self):
+        def reminder_checker():
+            while True:
+                now = datetime.now()
+                for reminder in self.reminders[:]:
+                    if now >= reminder["datetime"]:
+                        self.show_reminder(reminder)
+                        
+                        if reminder["repeat"]:
+                            reminder["datetime"] += timedelta(days=1)
+                        else:
+                            self.reminders.remove(reminder)
+                
+                self.update_reminders_list()
+                time.sleep(30)
+        
+        self.reminder_thread = threading.Thread(target=reminder_checker, daemon=True)
+        self.reminder_thread.start()
+    
+    def show_reminder(self, reminder):
+        self.root.after(0, lambda: self._show_reminder_gui(reminder))
+    
+    def _show_reminder_gui(self, reminder):
+        self.log(f"Напоминание: принять {reminder['medicine']}")
+        messagebox.showinfo(
+            "Напоминание о лекарстве",
+            f"Пора принять {reminder['medicine']}!"
+        )
+    
+    def log(self, message):
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
+        self.log_text.see(tk.END)
+        self.log_text.update()
+
+if __name__ == "__main__":
+    try:
+        root = tk.Tk()
+        app = SeniorHelperApp(root)
+        root.mainloop()
+    except Exception as e:
+        print(f"Произошла ошибка: {str(e)}")
