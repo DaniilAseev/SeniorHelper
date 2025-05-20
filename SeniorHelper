@@ -1,23 +1,28 @@
-import tkinter as tk
-from tkinter import messagebox, simpledialog
-import smtplib
+from kivy.app import App
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.label import Label
+from kivy.uix.button import Button
+from kivy.uix.dropdown import DropDown
+from kivy.uix.spinner import Spinner
+from kivy.uix.textinput import TextInput
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.popup import Popup
+from kivy.uix.switch import Switch
+from kivy.clock import Clock
+from kivy.utils import get_color_from_hex
+from kivy.core.clipboard import Clipboard
 from datetime import datetime, timedelta
+import webbrowser
 import threading
 import time
-import webbrowser
-import pyperclip
-from tkinter import ttk  # Для Combobox
 
-class SeniorHelperApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("SeniorHelper")
-        self.root.geometry("500x800")
+class SeniorHelperApp(App):
+    def build(self):
+        # Основной макет
+        self.layout = BoxLayout(orientation='vertical', spacing=10, padding=10)
         
-        # Настройки для SMS (используем Twilio API)
-        self.twilio_account_sid = 'your_account_sid'
-        self.twilio_auth_token = 'your_auth_token'
-        self.twilio_phone_number = 'your_twilio_phone'
+        # Настройки для экстренных контактов
         self.emergency_contacts = {
             "Скорая помощь": "112",
             "Полиция": "112",
@@ -25,312 +30,290 @@ class SeniorHelperApp:
             "Служба газа": "112"
         }
         
-        # Настройки видеозвонка (Jitsi Meet API)
+        # Настройки видеозвонка (Jitsi Meet)
         self.jitsi_server = "https://meet.jit.si/SeniorHelper-"
         self.current_video_call_url = ""
         
-        # Список активных напоминаний
+        # Список напоминаний
         self.reminders = []
-        self.reminder_thread = None
         
-        self.create_widgets()
-        self.start_reminder_checker()
+        # Создание интерфейса
+        self.create_sos_section()
+        self.create_video_call_section()
+        self.create_reminders_section()
+        self.create_log_section()
+        
+        # Запуск проверки напоминаний
+        Clock.schedule_interval(self.check_reminders, 30)
+        
+        return self.layout
     
-    def create_widgets(self):
-        # Кнопка SOS с выбором типа помощи
-        self.sos_frame = tk.LabelFrame(self.root, text="Экстренный вызов")
-        self.sos_frame.pack(fill=tk.X, padx=20, pady=10)
+    def create_sos_section(self):
+        # Раздел SOS
+        sos_layout = BoxLayout(orientation='vertical', size_hint=(1, 0.2))
         
-        self.help_type = tk.StringVar()
-        self.help_type.set("Скорая помощь")  # Значение по умолчанию
-        
-        self.help_combobox = ttk.Combobox(
-            self.sos_frame,
-            textvariable=self.help_type,
+        # Выбор типа помощи
+        self.help_type = Spinner(
+            text="Скорая помощь",
             values=list(self.emergency_contacts.keys()),
-            state="readonly",
-            font=("Arial", 12)
+            size_hint=(1, 0.3),
+            background_color=get_color_from_hex("#4CAF50"),
         )
-        self.help_combobox.pack(fill=tk.X, padx=5, pady=5)
         
-        self.sos_button = tk.Button(
-            self.sos_frame, 
-            text="SOS", 
-            bg="red", 
-            fg="white", 
-            font=("Arial", 24, "bold"),
-            height=2,
-            command=self.send_sos
+        # Кнопка SOS
+        self.sos_button = Button(
+            text="SOS",
+            size_hint=(1, 0.7),
+            background_color=get_color_from_hex("#F44336"),
+            color=get_color_from_hex("#FFFFFF"),
+            font_size=24,
+            on_press=self.send_sos
         )
-        self.sos_button.pack(fill=tk.X, padx=5, pady=5)
         
-        self.sos_status = tk.Label(
-            self.sos_frame,
+        # Статус SOS
+        self.sos_status = Label(
             text="Готов",
-            fg="green",
-            font=("Arial", 12)
-        )
-        self.sos_status.pack()
+            color=get_color_from_hex("#4CAF50"),
+            size_hint=(1, 0.2))
         
-        # Видеозвонок
-        self.video_call_frame = tk.Frame(self.root)
-        self.video_call_frame.pack(fill=tk.X, padx=20, pady=10)
+        sos_layout.add_widget(self.help_type)
+        sos_layout.add_widget(self.sos_button)
+        sos_layout.add_widget(self.sos_status)
         
-        self.video_call_button = tk.Button(
-            self.video_call_frame,
-            text="Видеозвонок",
-            bg="blue",
-            fg="white",
-            font=("Arial", 18),
-            height=2,
-            command=self.start_video_call
-        )
-        self.video_call_button.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        self.copy_link_button = tk.Button(
-            self.video_call_frame,
-            text="Копировать ссылку",
-            bg="light blue",
-            fg="black",
-            font=("Arial", 12),
-            height=2,
-            command=self.copy_video_link,
-            state=tk.DISABLED
-        )
-        self.copy_link_button.pack(side=tk.LEFT, fill=tk.X, padx=(5, 0), expand=True)
-        
-        # Напоминания о лекарствах
-        self.reminder_frame = tk.LabelFrame(self.root, text="Напоминания о лекарствах")
-        self.reminder_frame.pack(fill=tk.X, padx=20, pady=10)
-        
-        self.add_reminder_button = tk.Button(
-            self.reminder_frame,
-            text="Добавить напоминание",
-            bg="green",
-            fg="white",
-            font=("Arial", 18),
-            height=2,
-            command=self.add_reminder_dialog
-        )
-        self.add_reminder_button.pack(fill=tk.X, padx=5, pady=5)
-        
-        self.reminders_listbox = tk.Listbox(self.reminder_frame, height=5)
-        self.reminders_listbox.pack(fill=tk.BOTH, padx=5, pady=5, expand=True)
-        
-        # Лог событий
-        self.log_frame = tk.LabelFrame(self.root, text="Журнал событий")
-        self.log_frame.pack(fill=tk.BOTH, padx=20, pady=10, expand=True)
-        
-        self.log_text = tk.Text(self.log_frame)
-        self.log_text.pack(fill=tk.BOTH, padx=5, pady=5, expand=True)
+        self.layout.add_widget(sos_layout)
     
-    def send_sos(self):
-        help_type = self.help_type.get()
+    def create_video_call_section(self):
+        # Раздел видеозвонка
+        video_layout = BoxLayout(orientation='horizontal', size_hint=(1, 0.15))
+        
+        self.video_call_button = Button(
+            text="Видеозвонок",
+            size_hint=(0.7, 1),
+            background_color=get_color_from_hex("#2196F3"),
+            color=get_color_from_hex("#FFFFFF"),
+            on_press=self.start_video_call
+        )
+        
+        self.copy_link_button = Button(
+            text="Копировать ссылку",
+            size_hint=(0.3, 1),
+            background_color=get_color_from_hex("#BBDEFB"),
+            disabled=True,
+            on_press=self.copy_video_link
+        )
+        
+        video_layout.add_widget(self.video_call_button)
+        video_layout.add_widget(self.copy_link_button)
+        
+        self.layout.add_widget(video_layout)
+    
+    def create_reminders_section(self):
+        # Раздел напоминаний
+        reminders_layout = BoxLayout(orientation='vertical', size_hint=(1, 0.3))
+        
+        # Кнопка добавления напоминания
+        add_reminder_button = Button(
+            text="Добавить напоминание",
+            size_hint=(1, 0.2),
+            background_color=get_color_from_hex("#4CAF50"),
+            color=get_color_from_hex("#FFFFFF"),
+            on_press=self.show_add_reminder_popup
+        )
+        
+        # Список напоминаний
+        self.reminders_list = GridLayout(cols=1, spacing=5, size_hint_y=None)
+        self.reminders_list.bind(minimum_height=self.reminders_list.setter('height'))
+        
+        scroll_view = ScrollView(size_hint=(1, 0.8))
+        scroll_view.add_widget(self.reminders_list)
+        
+        reminders_layout.add_widget(add_reminder_button)
+        reminders_layout.add_widget(scroll_view)
+        
+        self.layout.add_widget(reminders_layout)
+    
+    def create_log_section(self):
+        # Раздел лога
+        log_layout = BoxLayout(orientation='vertical', size_hint=(1, 0.35))
+        
+        log_label = Label(
+            text="Журнал событий:",
+            size_hint=(1, 0.1),
+            color=get_color_from_hex("#000000")
+        )
+        
+        self.log_text = TextInput(
+            readonly=True,
+            size_hint=(1, 0.9),
+            background_color=get_color_from_hex("#FFFFFF")
+        )
+        
+        log_layout.add_widget(log_label)
+        log_layout.add_widget(self.log_text)
+        
+        self.layout.add_widget(log_layout)
+    
+    def send_sos(self, instance):
+        help_type = self.help_type.text
         contact_number = self.emergency_contacts.get(help_type, "112")
         
-        self.sos_status.config(text=f"Вызов {help_type}...", fg="orange")
+        self.sos_status.text = f"Вызов {help_type}..."
+        self.sos_status.color = get_color_from_hex("#FF9800")
         self.log(f"Активирована кнопка SOS - вызов {help_type}")
         
-        # Имитация отправки (в реальном приложении используйте Twilio API)
+        # Имитация отправки SOS в отдельном потоке
         threading.Thread(target=self._simulate_sos_send, args=(help_type, contact_number)).start()
     
     def _simulate_sos_send(self, help_type, contact_number):
-        try:
-            # Имитация задержки отправки
-            time.sleep(2)
-            
-            # В реальном приложении:
-            # from twilio.rest import Client
-            # client = Client(self.twilio_account_sid, self.twilio_auth_token)
-            # message = client.messages.create(
-            #     body=f"SOS! Требуется {help_type}!",
-            #     from_=self.twilio_phone_number,
-            #     to=contact_number
-            # )
-            
-            self.log(f"SOS уведомление отправлено: {help_type}")
-            self.sos_status.config(text=f"{help_type} в пути!", fg="green")
-            messagebox.showinfo("SOS", f"{help_type} уже в пути! Оставайтесь на связи.")
-        except Exception as e:
-            self.log(f"Ошибка при отправке SOS: {str(e)}")
-            self.sos_status.config(text="Ошибка отправки", fg="red")
-            messagebox.showerror("Ошибка", f"Не удалось вызвать {help_type}")
-    
-    def start_video_call(self):
-        self.log("Инициализация видеозвонка...")
+        time.sleep(2)  # Имитация задержки
+        self.log(f"SOS уведомление отправлено: {help_type}")
         
+        # Обновление интерфейса из главного потока
+        def update_ui():
+            self.sos_status.text = f"{help_type} в пути!"
+            self.sos_status.color = get_color_from_hex("#4CAF50")
+            self.show_popup("SOS", f"{help_type} уже в пути! Оставайтесь на связи.")
+        
+        Clock.schedule_once(lambda dt: update_ui())
+    
+    def start_video_call(self, instance):
         room_id = datetime.now().strftime("%Y%m%d%H%M%S")
         self.current_video_call_url = f"{self.jitsi_server}{room_id}"
         
-        self.log(f"Ссылка на видеозвонок: {self.current_video_call_url}")
-        self.copy_link_button.config(state=tk.NORMAL)
+        self.log(f"Создана ссылка на видеозвонок: {self.current_video_call_url}")
+        self.copy_link_button.disabled = False
         
-        webbrowser.open_new(self.current_video_call_url)
-        
-        messagebox.showinfo(
-            "Видеозвонок", 
-            f"Видеозвонок начат. Вы можете скопировать ссылку для приглашения."
-        )
+        webbrowser.open(self.current_video_call_url)
+        self.show_popup("Видеозвонок", "Видеозвонок начат. Скопируйте ссылку для приглашения.")
     
-    def copy_video_link(self):
+    def copy_video_link(self, instance):
         if self.current_video_call_url:
-            pyperclip.copy(self.current_video_call_url)
-            self.log("Ссылка на видеозвонок скопирована в буфер обмена")
-            messagebox.showinfo("Копирование", "Ссылка скопирована в буфер обмена!")
-        else:
-            messagebox.showerror("Ошибка", "Нет активной ссылки на видеозвонок")
+            Clipboard.copy(self.current_video_call_url)
+            self.log("Ссылка скопирована в буфер обмена")
+            self.show_popup("Копирование", "Ссылка скопирована!")
     
-    def add_reminder_dialog(self):
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Добавить напоминание")
-        dialog.resizable(False, False)
+    def show_add_reminder_popup(self, instance):
+        # Всплывающее окно для добавления напоминания
+        content = BoxLayout(orientation='vertical', spacing=10)
         
         # Название лекарства
-        tk.Label(dialog, text="Название лекарства:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
-        med_entry = tk.Entry(dialog, width=30)
-        med_entry.grid(row=0, column=1, padx=5, pady=2)
-        med_entry.focus_set()
+        medicine_input = TextInput(hint_text="Название лекарства", multiline=False)
         
         # Время
-        tk.Label(dialog, text="Время (ЧЧ:ММ):").grid(row=1, column=0, sticky="w", padx=5, pady=2)
-        
-        time_frame = tk.Frame(dialog)
-        time_frame.grid(row=1, column=1, padx=5, pady=2, sticky="w")
-        
-        self.hour_var = tk.StringVar()
-        self.minute_var = tk.StringVar()
-        
-        hour_spin = tk.Spinbox(
-            time_frame, 
-            from_=0, 
-            to=23, 
-            width=2, 
-            format="%02.0f", 
-            textvariable=self.hour_var,
-            command=lambda: self.auto_focus_minute(minute_spin)
-        )
-        hour_spin.pack(side=tk.LEFT)
-        
-        tk.Label(time_frame, text=":").pack(side=tk.LEFT)
-        
-        minute_spin = tk.Spinbox(
-            time_frame, 
-            from_=0, 
-            to=59, 
-            width=2, 
-            format="%02.0f", 
-            textvariable=self.minute_var
-        )
-        minute_spin.pack(side=tk.LEFT)
+        time_layout = BoxLayout(orientation='horizontal')
+        hour_spinner = Spinner(text="12", values=[f"{i:02d}" for i in range(24)])
+        minute_spinner = Spinner(text="00", values=[f"{i:02d}" for i in range(60)])
+        time_layout.add_widget(Label(text="Время:"))
+        time_layout.add_widget(hour_spinner)
+        time_layout.add_widget(Label(text=":"))
+        time_layout.add_widget(minute_spinner)
         
         # Повторение
-        repeat_var = tk.BooleanVar()
-        tk.Checkbutton(
-            dialog, 
-            text="Повторять ежедневно", 
-            variable=repeat_var
-        ).grid(row=2, columnspan=2, pady=5)
+        repeat_switch = Switch()
+        repeat_layout = BoxLayout(orientation='horizontal')
+        repeat_layout.add_widget(Label(text="Повторять ежедневно:"))
+        repeat_layout.add_widget(repeat_switch)
         
         # Кнопки
-        button_frame = tk.Frame(dialog)
-        button_frame.grid(row=3, columnspan=2, pady=5)
+        button_layout = BoxLayout(orientation='horizontal', spacing=5)
+        cancel_button = Button(text="Отмена")
+        save_button = Button(text="Сохранить", background_color=get_color_from_hex("#4CAF50"))
         
-        tk.Button(
-            button_frame, 
-            text="Отмена", 
-            command=dialog.destroy
-        ).pack(side=tk.LEFT, padx=5)
+        # Добавление виджетов
+        content.add_widget(medicine_input)
+        content.add_widget(time_layout)
+        content.add_widget(repeat_layout)
+        content.add_widget(button_layout)
         
-        tk.Button(
-            button_frame, 
-            text="Сохранить", 
-            command=lambda: self.save_reminder(
-                med_entry.get(),
-                f"{self.hour_var.get()}:{self.minute_var.get()}",
-                repeat_var.get(),
-                dialog
-            )
-        ).pack(side=tk.LEFT, padx=5)
-    
-    def auto_focus_minute(self, minute_entry):
-        minute_entry.focus_set()
-    
-    def save_reminder(self, medicine, time_str, repeat, dialog):
-        if not medicine:
-            messagebox.showerror("Ошибка", "Введите название лекарства")
-            return
+        popup = Popup(
+            title="Добавить напоминание",
+            content=content,
+            size_hint=(0.8, 0.5)
+        )
         
-        try:
-            reminder_time = datetime.strptime(time_str, "%H:%M").time()
-            now = datetime.now()
-            reminder_datetime = datetime.combine(now.date(), reminder_time)
+        def save_reminder(instance):
+            medicine = medicine_input.text
+            time_str = f"{hour_spinner.text}:{minute_spinner.text}"
+            repeat = repeat_switch.active
             
-            if reminder_datetime < now:
-                reminder_datetime += timedelta(days=1)
+            if not medicine:
+                self.show_popup("Ошибка", "Введите название лекарства")
+                return
             
-            reminder = {
-                "medicine": medicine,
-                "time": reminder_time,
-                "datetime": reminder_datetime,
-                "repeat": repeat
-            }
-            
-            self.reminders.append(reminder)
-            self.update_reminders_list()
-            self.log(f"Добавлено напоминание: {medicine} в {time_str}")
-            dialog.destroy()
-            
-        except ValueError:
-            messagebox.showerror("Ошибка", "Неверный формат времени")
+            try:
+                reminder_time = datetime.strptime(time_str, "%H:%M").time()
+                now = datetime.now()
+                reminder_datetime = datetime.combine(now.date(), reminder_time)
+                
+                if reminder_datetime < now:
+                    reminder_datetime += timedelta(days=1)
+                
+                reminder = {
+                    "medicine": medicine,
+                    "time": time_str,
+                    "datetime": reminder_datetime,
+                    "repeat": repeat
+                }
+                
+                self.reminders.append(reminder)
+                self.update_reminders_list()
+                self.log(f"Добавлено напоминание: {medicine} в {time_str}")
+                popup.dismiss()
+                
+            except ValueError:
+                self.show_popup("Ошибка", "Неверный формат времени")
+        
+        cancel_button.bind(on_press=popup.dismiss)
+        save_button.bind(on_press=save_reminder)
+        
+        button_layout.add_widget(cancel_button)
+        button_layout.add_widget(save_button)
+        
+        popup.open()
     
     def update_reminders_list(self):
-        self.reminders_listbox.delete(0, tk.END)
+        self.reminders_list.clear_widgets()
+        
         for reminder in sorted(self.reminders, key=lambda x: x["datetime"]):
             repeat = " (ежедневно)" if reminder["repeat"] else ""
-            self.reminders_listbox.insert(
-                tk.END,
-                f"{reminder['medicine']} в {reminder['time'].strftime('%H:%M')}{repeat}"
+            reminder_label = Label(
+                text=f"{reminder['medicine']} в {reminder['time']}{repeat}",
+                size_hint_y=None,
+                height=40,
+                color=get_color_from_hex("#000000")
             )
+            self.reminders_list.add_widget(reminder_label)
     
-    def start_reminder_checker(self):
-        def reminder_checker():
-            while True:
-                now = datetime.now()
-                for reminder in self.reminders[:]:
-                    if now >= reminder["datetime"]:
-                        self.show_reminder(reminder)
-                        
-                        if reminder["repeat"]:
-                            reminder["datetime"] += timedelta(days=1)
-                        else:
-                            self.reminders.remove(reminder)
-                
-                self.update_reminders_list()
-                time.sleep(30)
+    def check_reminders(self, dt):
+        now = datetime.now()
         
-        self.reminder_thread = threading.Thread(target=reminder_checker, daemon=True)
-        self.reminder_thread.start()
+        for reminder in self.reminders[:]:
+            if now >= reminder["datetime"]:
+                self.show_popup(
+                    "Напоминание",
+                    f"Пора принять {reminder['medicine']}!"
+                )
+                self.log(f"Напоминание: принять {reminder['medicine']}")
+                
+                if reminder["repeat"]:
+                    # Переносим на следующий день
+                    reminder["datetime"] += timedelta(days=1)
+                else:
+                    self.reminders.remove(reminder)
+        
+        self.update_reminders_list()
     
-    def show_reminder(self, reminder):
-        self.root.after(0, lambda: self._show_reminder_gui(reminder))
-    
-    def _show_reminder_gui(self, reminder):
-        self.log(f"Напоминание: принять {reminder['medicine']}")
-        messagebox.showinfo(
-            "Напоминание о лекарстве",
-            f"Пора принять {reminder['medicine']}!"
+    def show_popup(self, title, message):
+        popup = Popup(
+            title=title,
+            content=Label(text=message),
+            size_hint=(0.8, 0.4)
         )
+        popup.open()
     
     def log(self, message):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
-        self.log_text.see(tk.END)
-        self.log_text.update()
+        self.log_text.text += f"[{timestamp}] {message}\n"
 
 if __name__ == "__main__":
-    try:
-        root = tk.Tk()
-        app = SeniorHelperApp(root)
-        root.mainloop()
-    except Exception as e:
-        print(f"Произошла ошибка: {str(e)}")
+    SeniorHelperApp().run()
